@@ -1,0 +1,297 @@
+---
+title: "Modelování nelineárních vztahů pomoc splines"
+author: "Aleš Vomáčka"
+date: "19 4 2021"
+output:
+  ioslides_presentation:
+    widescreen: TRUE
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(scales)
+library(gt)
+library(broom)
+library(gtsummary)
+library(ggeffects)
+library(lspline)
+library(splines)
+
+un = read_rds("data/un_clean.rds")
+vote = read.csv("data/parl_vote_2017.csv")
+
+theme_set(theme_ggeffects())
+```
+
+## Motivační příklad
+
+-   V praxi jsou nelineární vztahy mezi proměnnými běžné
+
+```{r example-plot}
+ggplot(aes(x = GDPperCapita_10k, y = infantMortality), data = un) +
+  geom_point() +
+  scale_x_continuous(labels = label_number(suffix = "k", accuracy = 1)) +
+  labs(caption = "Každý bod reprezentuje zemi, zdroj dat - OSN \nInfantMortality = počet kojeneckých úmrtí na 1000 porodů; GDPperCapita_10k = HDP na hlavu v tisících amerických dolarů")
+```
+
+## Klasické modelování nelinearity
+
+-   Kromě specifických případů jsou v sociologii nejpopulárnější dvě techniky:
+
+    -   Kategorizace
+    -   Jednoduché polynomické funkce (např. kvadratická regrese)
+
+<br>
+
+-   Obě tyto techniky ale provází řada problémů
+
+## Kategorizace
+
+-   Numerická proměnná je převedena do sady diskrétních kategorií
+
+```{r mod-cat}
+mod_cat = lm(infantMortality ~ GDPperCapita_cat, data = un)
+
+plot(ggpredict(mod_cat, terms = "GDPperCapita_cat"))
+```
+
+## Problémy kategorizace
+
+-   Kategorizované prediktory jsou jednoduše interpretovatelné
+
+-   Ale řada technických problémů [@harrell2001]:
+
+    -   Predikce mají nižší preciznost, testy nižší statistickou sílu
+    -   Předpoklad, že všechny pozorování uvnitř intervalu mají stejnou hodnotu závislé proměnné
+    -   Předpoklad skokových změn při přechodu mezi intervaly
+    -   Hranice intervalů jsou arbitrátní a manipulovatelné
+
+## Problémy kategorizace
+
+```{r}
+mod_cat_marginals = ggpredict(mod_cat, terms = "GDPperCapita_cat")
+
+ggplot(aes(x = GDPperCapita_10k, y = infantMortality), data = un) +
+  geom_point(alpha = 0.5) + 
+  geom_segment(aes(x = 0, xend = 10, y = mod_cat_marginals[1,2], yend = mod_cat_marginals[1,2]), size = 1) +
+  geom_segment(aes(x = 10, xend = 20, y = mod_cat_marginals[2,2], yend = mod_cat_marginals[2,2]), size = 1) +
+  geom_segment(aes(x = 20, xend = 42, y = mod_cat_marginals[3,2], yend = mod_cat_marginals[3,2]), size = 1) +
+  scale_x_continuous(labels = label_number(suffix = "k", accuracy = 1))
+  
+```
+
+## Jednoduché polynomy
+
+-   Numerická proměnná modelováná pomocí polynomické funkce (např. GDPperCapita^2^):
+
+```{r mod-poly}
+mod_poly = lm(infantMortality ~ poly(GDPperCapita_10k, 2), data = un[!is.na(un$GDPperCapita), ])
+
+plot(ggpredict(mod_poly, terms = "GDPperCapita_10k")) +
+    scale_x_continuous(labels = label_number(suffix = "k", accuracy = 1))
+```
+
+## Problémy jednoduchých polynomů
+
+-   Polynomy můžou podchytit nelineární vztahy bez nutnosti kategorizovat
+
+-   Mají ovšem svoje vlastní problémy:
+
+    -   Dokaží zachytit jen určitý typ nelinearity (ten polynomický)
+    -   Extrémně nestabilní na okrajích dat, mají tendenci se "kroutit"
+
+## Problémy jednoduchých polynomů
+
+```{r mod-poly-plot}
+plot(ggpredict(mod_poly, terms = "GDPperCapita_10k"), add.data = T) +
+    scale_x_continuous(labels = label_number(suffix = "k", accuracy = 1))
+```
+
+## Spliny
+
+-   Existuje lepší technika, než kategorizace a jednoduché polynomy?
+
+    -   Spliny (zvané též piecewise regrese)
+
+<br>
+
+-   Základní myšlenka splinů je jednoduchá:
+
+    -   Místo prokládání jedné přímky/křivky napříč celým rozsahem dat, si data rozdělíme na menší úseky (*bins*) a proložíme přímku/křivku každým zvlášť tak, aby na sebe navazovaly
+    -   hranicím mezi úseky se říká uzly (*knots*)
+
+<br>
+
+-   Technické detaily viz @harrell2001 nebo @fox2015
+
+## Lineární spliny
+
+-   Nejjednoduší forma splinů - úseky je proložená přímka
+
+```{r lin-splines}
+mod_ls = lm(infantMortality ~ lspline(GDPperCapita_10k, knots = c(10, 20)), data = un)
+
+plot(ggpredict(mod_ls, terms = "GDPperCapita_10k"), add.data = T) +
+    scale_x_continuous(labels = label_number(suffix = "k", accuracy = 1))
+```
+
+## Lineární spliny
+
+-   Lepší forma kategorizace (méně nerealistických předpokladů), pořád dobře interpretovatelné
+
+```{r ls-summary}
+tidy(mod_ls) %>% 
+  mutate(across(where(is.numeric), round, 2),
+         term = recode(term,
+                       "(Intercept)" = "Intercept",
+                       "lspline(GDPperCapita_10k, knots = c(10, 20))1" = "GDPperCapita (<10k)",
+                       "lspline(GDPperCapita_10k, knots = c(10, 20))2" = "GDPperCapita (10k<x<20k)",
+                       "lspline(GDPperCapita_10k, knots = c(10, 20))3" = "GDPperCapita (<20k)")) %>% 
+  gt() %>% 
+  cols_label(.list = list(term = "Term", estimate = "Estimate", std.error = "SE", statistic = "t statistic", p.value = "p value")) %>% tab_options(table.width = 800)
+```
+
+<br>
+
+-   Regresní koeficienty představují jednoduše sklon regresní přímky v daném úseku
+
+## Přirození spliny
+
+-   Lineární spliny nemají nerealistické předpoklady o konstantní hodnotě uvnitř intervalu, pořád ale předpokládají náhlou změnu vztahu v určitých hodnotách (uzlech) a jsou citlivé na pozici uzlů
+
+<br>
+
+-   Existuje ještě flexibilnější metoda?
+
+-   Ano! Polynomické spliny
+
+    -   Konkrétně, přirozené spliny (*natural splines*), někdy zvané omezené kubické spliny (*restricted cubic splines*)
+
+## Přirozené spliny
+
+-   Řeší oba problémy jednoduchých polynomů
+
+    -   Ve vnitřních úsecích prokládají několik na sebe navazujících křivek, čímž dokáží postihnout téměř jakkoukoliv formu nelinearity
+    -   V krajních úsecích prokládají přímky, čímž se stabilizují predikce
+
+## Přirozené spliny
+
+```{r ns-example}
+ggplot(aes(x = agea, y = vote), data = vote) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F, formula = y ~ ns(x,2)) +
+  geom_vline(xintercept = quantile(vote$agea, probs = 0.1), linetype = "dashed") +
+  geom_vline(xintercept = quantile(vote$agea, probs = 0.5), linetype = "dashed") +
+  geom_vline(xintercept = quantile(vote$agea, probs = 0.9), linetype = "dashed") +
+  annotate(geom = "text", x = 17, y = 0.9, label = "Linear fit", color = "grey50") +
+  annotate(geom = "text", x = 89, y = 0.9, label = "Linear fit", color = "grey50") +
+  annotate(geom = "text", x = 35, y = 0.9, label = "Cubic fit", color = "grey50") +
+  annotate(geom = "text", x = 65, y = 0.9, label = "Cubic fit", color = "grey50") +
+  labs(caption = "Voter turnout in 2017 parliament elections per age group (data source = ESS 8th wave, Czech Republic)")
+```
+
+## Přirozené spliny
+
+-   Přirozené spliny na našich datech (4 uzly, 2 vnitřní a 2 vnější)
+
+```{r model-ns}
+mod_ns = lm(infantMortality ~ ns(GDPperCapita_10k, df = 3), data = un)
+
+plot(ggpredict(mod_ns, terms = "GDPperCapita_10k"), add.data = TRUE)
+```
+
+## Přirozené spliny
+
+-   Jeden z nejflexibilnějších nástrojů pro modelování nelineárních vztahů v kontextu lineárních modelů
+
+-   Nevýhodou je, že (stejně jako jednoduché polynomy) je v podstatě nemožné interpretovat regresní koeficienty
+
+```{r ns-table}
+tidy(mod_ns) %>% 
+  mutate(across(where(is.numeric), round, 2),
+         term = recode(term,
+                       "(Intercept)" = "Intercept",
+                       "ns(GDPperCapita_10k, df = 3)1" = "GDPperCapita (<10k), cubic",
+                       "ns(GDPperCapita_10k, df = 3)2" = "GDPperCapita (10k<x<20k), cubic",
+                       "ns(GDPperCapita_10k, df = 3)3" = "GDPperCapita (<20k), cubic")) %>% 
+  gt() %>% 
+  cols_label(.list = list(term = "Term", estimate = "Estimate", std.error = "SE", statistic = "t statistic", p.value = "p value")) %>% tab_options(table.width = 800)
+```
+
+## Pozice uzlů
+
+-   Poslední otázka: Jak rozmístit uzly?
+
+<br>
+
+-   Lineární spliny velmi citlivé na pozici uzlů (stejně jako klasická kategorizace) -\> uzly rozmisťovat na základě teorie
+
+<br>
+
+-   Přirozené spliny naopak velmi robustní
+
+    -   Dokud jsou uzly rozmístěny rovnoměrně, jejich pozice je méně důležitá
+    -   Primární je jejich počet
+
+## Pozice uzlů přirozených splinů
+
+-   V praxi většinou stačí 3-4 uzly (2 krajní a 1-2 vnitřní)
+-   Každý uzel je jeden parametr v modelu -\> můžeme zkusit několik modelů a vybrat ten s nejlepším penalizovaným fitem (adj. R^2^, AIC)
+-   Optimální pozice uzlů podle jejich počtu [@harrell2001, pp. 27] :
+
+| Uzly |       |        | Kvantil |      |        |        |       |
+|------|-------|--------|---------|------|--------|--------|-------|
+| 3    |       | 0.1    | 0.5     | 0.9  |        |        |       |
+| 4    |       | 0.05   | 0.35    | 0.65 | 0.95   |        |       |
+| 5    |       | 0.05   | 0.275   | 0.5  | 0.725  | 0.95   |       |
+| 6    | 0.05  | 0.23   | 0.41    | 0.59 | 0.77   | 0.95   |       |
+| 7    | 0.025 | 0.1833 | 0.33417 | 0.5  | 0.6583 | 0.8167 | 0.975 |
+
+## Spliny v R
+
+-   Balíček `lsplines` pro lineární spliny
+-   Balíček `splines` pro přirozené spliny (a všechny ostatní)
+
+<br>
+
+-   Měli by fungovat se všemi funkcemi založenými na `stats::glm()`
+
+# R inteRmezzo!
+
+## Srovnání splinů s ostatními metodami
+
++---------------------+----------------------------------------+------------------------------------------------------------------------------------------+
+| Technika            | Výhody                                 | Nevýhody                                                                                 |
++=====================+========================================+==========================================================================================+
+| Kategorizace        | Velmi jednoduchá interpretace          | Nerealistické předpoklady, citlivá na umístění uzlů                                      |
++---------------------+----------------------------------------+------------------------------------------------------------------------------------------+
+| Lineární spliny     | Jednoduchá interpretace                | předpoklad náhlých změn, citlivá na umístění uzlů                                        |
++---------------------+----------------------------------------+------------------------------------------------------------------------------------------+
+| Jednoduché polynomy | ?                                      | Omezená na určité typy nelinearity, nestabilní na okrajích, nutné interpretovat graficky |
++---------------------+----------------------------------------+------------------------------------------------------------------------------------------+
+| Přirozené spliny    | Dokaží pokrýt řadu nelineárních vztahů | Nutné interpretovat graficky                                                             |
++---------------------+----------------------------------------+------------------------------------------------------------------------------------------+
+
+## Srovnání přirozených splinů s polynomickými členy
+
+```{r ns-vs-poly-example, warning=FALSE, message=FALSE}
+
+ggplot(un, mapping = aes(x = GDPperCapita_10k, y = infantMortality)) +
+geom_point() +
+geom_smooth(method = "lm", se = F, formula = y ~ ns(x, df = 6), mapping = aes(color = "Přirozený spline")) +
+geom_smooth(method = "lm", se = F, formula = y ~ poly(x, 5), mapping = aes(color = "Polynomický člen")) +
+scale_color_manual(values = c("red", "blue")) +
+labs(caption = "Oba modely mají stejný počet stupňů volnosti", color = element_blank()) +
+theme(legend.position = c(0.8, 0.8))
+
+```
+
+## Spliny jinde
+
+-   STATA - funkce `mkspline`
+-   SPSS - nemá vlastní funkci, nutné počítat ["ručně"](https://www.ibm.com/support/pages/spline-regression-aka-piecewise-polynomials-or-segmented-regression)
+
+## Reference
