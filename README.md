@@ -12,7 +12,7 @@ V této části si ukážeme, jak aplikovat dva typy splinů, lineární a přir
 
 Depozitář obsahuje všechny materiály všechny materiály k workshopu.
 Použitá data původně z knihy Applied Regression Analysis and Generalized Linear Models od Johna Foxe.
-Popis proměnn [zde](https://socialsciences.mcmaster.ca/jfox/Books/Applied-Regression-3E/datasets/UnitedNations.pdf).
+Popis proměnných [zde](https://socialsciences.mcmaster.ca/jfox/Books/Applied-Regression-3E/datasets/UnitedNations.pdf).
 
 
 Prezentace v HTML formátu ke stažení [zde](https://github.com/alesvomacka/workshop_splines/raw/master/02_splines_slides.html) (*Uložit jako...*).
