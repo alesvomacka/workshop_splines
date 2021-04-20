@@ -131,6 +131,17 @@ plot(ggpredict(mod_poly, terms = "GDPperCapita_10k"), add.data = T) +
 
 -   Nejjednoduší forma splinů - úseky je proložená přímka
 
+```{r splines-example, fig.cap="Example of spline function, dividing data into 4 bins"}
+ggplot(aes(x = agea, y = vote), data = vote) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F, formula = y ~ lspline(x, c(25,50,75))) +
+  geom_vline(xintercept = 25, linetype = "dashed") +
+  geom_vline(xintercept = 50, linetype = "dashed") +
+  geom_vline(xintercept = 75, linetype = "dashed")
+```
+
+## Lineární spliny
+
 ```{r lin-splines}
 mod_ls = lm(infantMortality ~ lspline(GDPperCapita_10k, knots = c(10, 20)), data = un)
 
